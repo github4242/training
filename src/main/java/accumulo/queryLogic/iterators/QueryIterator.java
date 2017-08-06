@@ -33,6 +33,12 @@ public abstract class QueryIterator implements SortedKeyValueIterator<Key, Value
 	public abstract IteratorSetting getIteratorSetting(int priority);
 
 	@Override
+	public void init(SortedKeyValueIterator<Key, Value> source, Map<String, String> options, IteratorEnvironment env)
+			throws IOException {
+		setSource(source);
+	}
+
+	@Override
 	public abstract QueryIterator deepCopy(IteratorEnvironment env);
 
 	public abstract String serialize() throws IOException;

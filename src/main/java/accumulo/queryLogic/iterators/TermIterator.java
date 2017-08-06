@@ -46,8 +46,12 @@ public abstract class TermIterator extends QueryIterator {
 	public void init(SortedKeyValueIterator<Key, Value> source, Map<String, String> options, IteratorEnvironment env)
 			throws IOException {
 		this.source = source;
-		fieldName = options.get("fieldName");
-		fieldValue = options.get("fieldValue");
+		if (fieldName == null) {
+			fieldName = options.get("fieldName");
+		}
+		if (fieldValue == null) {
+			fieldValue = options.get("fieldValue");
+		}
 		if (fieldName == null || fieldValue == null) {
 			throw new IllegalArgumentException("Option entries 'fieldName' and 'fieldValue' are mandatory.");
 		}

@@ -6,6 +6,7 @@ import java.io.IOException;
 import java.lang.reflect.InvocationTargetException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -17,8 +18,8 @@ import org.apache.accumulo.core.data.Range;
 import org.apache.accumulo.core.data.Value;
 import org.apache.accumulo.core.iterators.IteratorEnvironment;
 import org.apache.accumulo.core.iterators.SortedKeyValueIterator;
+import org.apache.commons.collections.ListUtils;
 import org.apache.commons.net.util.Base64;
-import org.apache.hadoop.io.Text;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -27,12 +28,11 @@ public class AndIterator extends QueryIterator {
 	private static final Logger LOGGER = LoggerFactory.getLogger(AndIterator.class);
 	private static final long serialVersionUID = 1L;
 
-	private static final Text EMPTY_TEXT = new Text("");
-
 	private List<QueryIterator> childIterators;
-	private boolean hasTop;
-	private Key topKey;
-	private Value topValue;
+	private QueryIterator lastChild;
+	private boolean noResults = true;
+	private boolean sourcesSet = false;
+	private IteratorEnvironment env;
 
 	public AndIterator() {
 		childIterators = new ArrayList<>();
@@ -54,69 +54,93 @@ public class AndIterator extends QueryIterator {
 			throws IOException {
 		for (int i = 0; i < options.size(); i++) {
 			childIterators.add(deserializeChild(options.get(Integer.toString(i))));
+			if (i == 0) {
+				childIterators.get(0).init(source, Collections.emptyMap(), env);
+			} else {
+				// source.deepCopy(env);
+			}
 		}
-
-		hasTop = false;
-		topKey = null;
-		topValue = null;
+		lastChild = childIterators.size() == 0 ? null : childIterators.get(childIterators.size() - 1);
 		this.source = source;
-		for (QueryIterator child : childIterators) {
-			child.setSource(source);
-		}
+		this.env = env;
 	}
 
 	@Override
 	public boolean hasTop() {
-		return hasTop ? source.hasTop() : false;
+		if (noResults) {
+			return false;
+		} else {
+			return lastChild == null ? false : lastChild.hasTop();
+		}
 	}
 
 	@Override
 	public void next() throws IOException {
-		childIterators.get(childIterators.size() - 1).next();
+		if (lastChild == null || noResults) {
+			return;
+		} else {
+			lastChild.next();
+		}
 	}
 
+	@SuppressWarnings("unchecked")
 	@Override
 	public void seek(Range range, Collection<ByteSequence> columnFamilies, boolean inclusive) throws IOException {
-		boolean isFirst = true;
-		// Range currentRange = new Range(range);
-		QueryIterator lastIter = null;
-		Text docId = null;
-		for (QueryIterator child : childIterators) {
-			child.seek(range, columnFamilies, inclusive);
-			if (isFirst) {
-				range = new Range(child.getTopKey().getRow(), range.getEndKey().getRow());
-				isFirst = false;
-				docId = child.getTopKey().getColumnQualifier();
-				lastIter = child;
-			} else if (!child.hasTop() || !docId.equals(child.getTopKey().getColumnQualifier())) {
-
-				topKey = null;
-				topValue = null;
-				hasTop = false;
-				return;
-			} else {
-				lastIter = child;
-			}
+		List<Range> ranges = Collections.singletonList(range);
+		int nrChilds = childIterators.size();
+		if (nrChilds == 0) {
+			return;
 		}
-		if (lastIter != null) {
-			topKey = lastIter.getTopKey();
-			topValue = lastIter.getTopValue();
-			hasTop = lastIter.hasTop();
-		} else {
-			topKey = null;
-			topValue = null;
-			hasTop = false;
+
+		if (nrChilds == 1) {
+			noResults = false;
+			lastChild.seek(range, columnFamilies, inclusive);
+			return;
+		}
+
+		if (!sourcesSet) {
+			for (int i = 1; i < nrChilds; i++) {
+				childIterators.get(i).setSource(source.deepCopy(env));// , Collections.emptyMap(), env);
+			}
+			sourcesSet = true;
+		}
+
+		for (int i = 0; i < nrChilds - 1; i++) {
+			List<Range> tempRanges = null;
+			QueryIterator child = childIterators.get(i);
+			for (Range thisRange : ranges) {
+				child.seek(thisRange, columnFamilies, inclusive);
+				if (!child.hasTop()) {
+					continue;
+				}
+				noResults = false;
+				tempRanges = new ArrayList<>();
+				while (child.hasTop()) {
+					List<Range> thisRow = Collections.singletonList(Range.exact(child.getTopKey().getRow()));
+					tempRanges = Range.mergeOverlapping(ListUtils.union(tempRanges, thisRow));
+					child.next();
+				}
+			}
+			ranges = tempRanges;
 		}
 	}
 
 	@Override
 	public Key getTopKey() {
-		return topKey;
+		if (noResults) {
+			return null;
+		} else {
+			return lastChild == null ? null : lastChild.getTopKey();
+		}
 	}
 
 	@Override
 	public Value getTopValue() {
-		return topValue;
+		if (noResults) {
+			return null;
+		} else {
+			return lastChild == null ? null : lastChild.getTopValue();
+		}
 	}
 
 	@Override
