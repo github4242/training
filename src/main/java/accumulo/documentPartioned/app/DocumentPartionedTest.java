@@ -6,7 +6,6 @@ import java.util.Collection;
 import java.util.List;
 
 import org.apache.accumulo.core.client.Connector;
-import org.apache.commons.math3.util.Pair;
 
 import accumulo.documentPartioned.crud.AccumuloCrud;
 import accumulo.documentPartioned.crud.DefaultAccumuloCrud;
@@ -42,10 +41,11 @@ public class DocumentPartionedTest {
 			// crud.showWholeTable(DATA_TABLE);
 			// crud.showWholeTable(INDEX_TABLE);
 
-			// List<String> results = crud.queryPrefix("name", "Bern");
-			List<Pair<String, String>> fields = Arrays.<Pair<String, String>>asList(new Pair<>("age", "2"),
-					new Pair<>("name", "HarryPotter3"));
-			List<String> results = crud.queryMultiExact(fields);
+			List<String> results = crud.queryExact("name", "HarryPotter0");
+			// List<Pair<String, String>> fields = Arrays.<Pair<String, String>>asList(new
+			// Pair<>("age", "2"),
+			// new Pair<>("name", "HarryPotter3"));
+			// List<String> results = crud.queryMultiExact(fields);
 			int i = 0;
 			for (String res : results) {
 				System.out.println(res);

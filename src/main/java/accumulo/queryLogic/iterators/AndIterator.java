@@ -22,6 +22,7 @@ import org.apache.accumulo.core.iterators.SortedKeyValueIterator;
 import org.apache.commons.collections.ListUtils;
 import org.apache.commons.math3.util.Pair;
 import org.apache.commons.net.util.Base64;
+import org.apache.hadoop.io.Text;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -39,6 +40,7 @@ public class AndIterator extends QueryIterator {
 	private Key topKey = null;
 	private Value topValue = null;
 	private boolean hasTop = false;
+	private List<Text> docIds = new ArrayList<>();
 
 	public AndIterator() {
 		childIterators = new ArrayList<>();
@@ -116,27 +118,38 @@ public class AndIterator extends QueryIterator {
 		}
 
 		for (int i = 0; i < nrChilds - 1; i++) {
-			List<Range> tempRanges = null;
+			List<Range> tempRanges = new ArrayList<>();
 			QueryIterator child = childIterators.get(i);
+			List<Text> tempDocIds = new ArrayList<>();
 			for (Range thisRange : ranges) {
 				child.seek(thisRange, columnFamilies, inclusive);
 				if (!child.hasTop()) {
 					continue;
 				}
 				noResults = false;
-				tempRanges = new ArrayList<>();
 				while (child.hasTop()) {
 					List<Range> thisRow = Collections.singletonList(Range.exact(child.getTopKey().getRow()));
 					tempRanges = Range.mergeOverlapping(ListUtils.union(tempRanges, thisRow));
+
+					if (i == 0) {
+						docIds.add(child.getTopKey().getColumnQualifier());
+					} else {
+						tempDocIds.add(child.getTopKey().getColumnQualifier());
+					}
 					child.next();
 				}
+			}
+			if (i != 0) {
+				docIds.retainAll(tempDocIds);
 			}
 			ranges = tempRanges;
 		}
 		for (Range thisRange : ranges) {
 			lastChild.seek(thisRange, columnFamilies, inclusive);
 			while (lastChild.hasTop()) {
-				results.add(new Pair<>(lastChild.getTopKey(), lastChild.getTopValue()));
+				if (docIds.contains(lastChild.getTopKey().getColumnQualifier())) {
+					results.add(new Pair<>(lastChild.getTopKey(), lastChild.getTopValue()));
+				}
 				lastChild.next();
 			}
 		}

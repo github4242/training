@@ -80,7 +80,8 @@ public class TestIterators {
 			scanner.clearScanIterators();
 
 			ExactTermIterator iter4 = new ExactTermIterator("city", "Hogwarts");
-			List<QueryIterator> terms = Arrays.asList(iter, iter4);
+			ExactTermIterator iter5 = new ExactTermIterator("age", "3");
+			List<QueryIterator> terms = Arrays.asList(iter, iter4, iter5);
 			AndIterator andIter = new AndIterator(terms);
 			IteratorSetting setting3 = andIter.getIteratorSetting(70);
 			scanner.addScanIterator(setting3);
