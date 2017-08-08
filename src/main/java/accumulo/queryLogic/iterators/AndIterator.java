@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
@@ -19,9 +20,12 @@ import org.apache.accumulo.core.data.Value;
 import org.apache.accumulo.core.iterators.IteratorEnvironment;
 import org.apache.accumulo.core.iterators.SortedKeyValueIterator;
 import org.apache.commons.collections.ListUtils;
+import org.apache.commons.math3.util.Pair;
 import org.apache.commons.net.util.Base64;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import accumulo.queryLogic.util.ProxyEnv;
 
 public class AndIterator extends QueryIterator {
 
@@ -31,8 +35,10 @@ public class AndIterator extends QueryIterator {
 	private List<QueryIterator> childIterators;
 	private QueryIterator lastChild;
 	private boolean noResults = true;
-	private boolean sourcesSet = false;
-	private IteratorEnvironment env;
+	private Iterator<Pair<Key, Value>> resultsIterator;
+	private Key topKey = null;
+	private Value topValue = null;
+	private boolean hasTop = false;
 
 	public AndIterator() {
 		childIterators = new ArrayList<>();
@@ -52,17 +58,18 @@ public class AndIterator extends QueryIterator {
 	@Override
 	public void init(SortedKeyValueIterator<Key, Value> source, Map<String, String> options, IteratorEnvironment env)
 			throws IOException {
+		ProxyEnv proxyEnv = new ProxyEnv(env);
 		for (int i = 0; i < options.size(); i++) {
 			childIterators.add(deserializeChild(options.get(Integer.toString(i))));
 			if (i == 0) {
-				childIterators.get(0).init(source, Collections.emptyMap(), env);
+				childIterators.get(0).setSource(source);
+				;
 			} else {
-				// source.deepCopy(env);
+				childIterators.get(i).setSource(source.deepCopy(proxyEnv));
 			}
 		}
 		lastChild = childIterators.size() == 0 ? null : childIterators.get(childIterators.size() - 1);
 		this.source = source;
-		this.env = env;
 	}
 
 	@Override
@@ -70,7 +77,7 @@ public class AndIterator extends QueryIterator {
 		if (noResults) {
 			return false;
 		} else {
-			return lastChild == null ? false : lastChild.hasTop();
+			return hasTop;
 		}
 	}
 
@@ -79,13 +86,23 @@ public class AndIterator extends QueryIterator {
 		if (lastChild == null || noResults) {
 			return;
 		} else {
-			lastChild.next();
+			if (resultsIterator.hasNext()) {
+				Pair<Key, Value> res = resultsIterator.next();
+				hasTop = true;
+				topKey = res.getFirst();
+				topValue = res.getSecond();
+			} else {
+				hasTop = false;
+				topKey = null;
+				topValue = null;
+			}
 		}
 	}
 
 	@SuppressWarnings("unchecked")
 	@Override
 	public void seek(Range range, Collection<ByteSequence> columnFamilies, boolean inclusive) throws IOException {
+		List<Pair<Key, Value>> results = new ArrayList<>();
 		List<Range> ranges = Collections.singletonList(range);
 		int nrChilds = childIterators.size();
 		if (nrChilds == 0) {
@@ -96,13 +113,6 @@ public class AndIterator extends QueryIterator {
 			noResults = false;
 			lastChild.seek(range, columnFamilies, inclusive);
 			return;
-		}
-
-		if (!sourcesSet) {
-			for (int i = 1; i < nrChilds; i++) {
-				childIterators.get(i).setSource(source.deepCopy(env));// , Collections.emptyMap(), env);
-			}
-			sourcesSet = true;
 		}
 
 		for (int i = 0; i < nrChilds - 1; i++) {
@@ -123,6 +133,22 @@ public class AndIterator extends QueryIterator {
 			}
 			ranges = tempRanges;
 		}
+		for (Range thisRange : ranges) {
+			lastChild.seek(thisRange, columnFamilies, inclusive);
+			while (lastChild.hasTop()) {
+				results.add(new Pair<>(lastChild.getTopKey(), lastChild.getTopValue()));
+				lastChild.next();
+			}
+		}
+		if (!results.isEmpty()) {
+			hasTop = true;
+			resultsIterator = results.iterator();
+			Pair<Key, Value> firstEntry = resultsIterator.next();
+			topKey = firstEntry.getFirst();
+			topValue = firstEntry.getSecond();
+		} else {
+			hasTop = false;
+		}
 	}
 
 	@Override
@@ -130,7 +156,7 @@ public class AndIterator extends QueryIterator {
 		if (noResults) {
 			return null;
 		} else {
-			return lastChild == null ? null : lastChild.getTopKey();
+			return topKey;
 		}
 	}
 
@@ -139,7 +165,7 @@ public class AndIterator extends QueryIterator {
 		if (noResults) {
 			return null;
 		} else {
-			return lastChild == null ? null : lastChild.getTopValue();
+			return topValue;
 		}
 	}
 
